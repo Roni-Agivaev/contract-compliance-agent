@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic
+python-dotenv
+langchain-core
+langchain-openai
+langchain-text-splitters
+pinecone
+tiktoken
+pypdf
+supabase

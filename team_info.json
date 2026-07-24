@@ -1,0 +1,9 @@
+{
+  "group_batch_order_number": "3_02",
+  "team_name": "Maayan, Roni, Ofir",
+  "students": [
+    { "name": "Ronald Agivaev", "email": "ronald.a@campus.technion.ac.il" },
+    { "name": "Maayan Yamin",   "email": "maayan.yamin@campus.technion.ac.il" },
+    { "name": "Ofir Rashty",    "email": "ofir.rashty@campus.technion.ac.il" }
+  ]
+}

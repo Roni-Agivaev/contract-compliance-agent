@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Contract Compliance Agent</title>
+<style>
+  :root { --bg:#0f1220; --card:#1a1f36; --ink:#eef1f8; --mut:#9aa3c0; --acc:#6c8cff; --line:#2a3157; --ok:#3ecf8e; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.55 -apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); color:var(--ink); }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 28px 18px 80px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--mut); margin: 0 0 20px; }
+  label { display:block; font-weight:600; margin: 14px 0 6px; }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  input, textarea { width:100%; background:var(--card); color:var(--ink); border:1px solid var(--line);
+    border-radius:10px; padding:10px 12px; font: inherit; }
+  textarea { min-height: 170px; resize: vertical; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:13px; }
+  button { margin-top:16px; background:var(--acc); color:#fff; border:0; border-radius:10px;
+    padding:12px 20px; font-weight:700; cursor:pointer; }
+  button:disabled { opacity:.55; cursor:default; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-top:22px; }
+  .card h2 { font-size:15px; margin:0 0 10px; color:var(--mut); text-transform:uppercase; letter-spacing:.04em; }
+  #response { white-space: pre-wrap; }
+  details { border:1px solid var(--line); border-radius:10px; margin:10px 0; background:#141834; }
+  summary { cursor:pointer; padding:10px 12px; font-weight:600; }
+  .step-body { padding:0 12px 12px; }
+  pre { background:#0b0e1c; border:1px solid var(--line); border-radius:8px; padding:10px; overflow:auto; font-size:12px; }
+  .mod { color: var(--acc); }
+  .err { color:#ff7a7a; }
+  .hint { color:var(--mut); font-size:13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>⚖️ Contract Compliance Agent</h1>
+  <p class="sub">Audit an international employment contract against both jurisdictions' labor law — and auto-fix it.</p>
+
+  <div class="row">
+    <div>
+      <label for="company">Company country</label>
+      <input id="company" placeholder="e.g. United States" value="United States" />
+    </div>
+    <div>
+      <label for="employee">Employee country</label>
+      <input id="employee" placeholder="e.g. Germany" value="Germany" />
+    </div>
+  </div>
+
+  <label for="contract">Contract / Offer text</label>
+  <textarea id="contract" placeholder="Paste the contract or offer letter here...">This Employment Agreement is between Acme Inc. (US) and the Employee (Germany). Compensation is EUR 1,200 per month. Either party may terminate this agreement effective immediately, with no prior notice.</textarea>
+
+  <button id="run">Run Agent</button>
+  <span class="hint" id="status"></span>
+
+  <div class="card" id="responseCard" style="display:none">
+    <h2>Agent response</h2>
+    <div id="response"></div>
+  </div>
+
+  <div class="card" id="stepsCard" style="display:none">
+    <h2>Execution trace (steps)</h2>
+    <div id="steps"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function esc(s){ return String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+// tiny markdown -> html (headings, bold, italics, list items, hr)
+function md(t){
+  const lines = String(t).split("\n"); let html=""; let inList=false;
+  for(let ln of lines){
+    if(/^---\s*$/.test(ln)){ if(inList){html+="</ul>";inList=false;} html+="<hr>"; continue; }
+    let m;
+    if(m=ln.match(/^###\s+(.*)/)){ if(inList){html+="</ul>";inList=false;} html+="<h3>"+inline(m[1])+"</h3>"; continue; }
+    if(m=ln.match(/^##\s+(.*)/)){ if(inList){html+="</ul>";inList=false;} html+="<h2 style='text-transform:none;color:var(--ink)'>"+inline(m[1])+"</h2>"; continue; }
+    if(m=ln.match(/^-\s+(.*)/)){ if(!inList){html+="<ul>";inList=true;} html+="<li>"+inline(m[1])+"</li>"; continue; }
+    if(ln.trim()===""){ if(inList){html+="</ul>";inList=false;} html+="<br>"; continue; }
+    if(inList){html+="</ul>";inList=false;}
+    html+="<div>"+inline(ln)+"</div>";
+  }
+  if(inList) html+="</ul>";
+  return html;
+}
+function inline(s){
+  s = esc(s);
+  s = s.replace(/\*\*(.+?)\*\*/g,"<b>$1</b>");
+  s = s.replace(/_(.+?)_/g,"<i>$1</i>");
+  return s;
+}
+
+async function run(){
+  const company = $("company").value.trim();
+  const employee = $("employee").value.trim();
+  const contract = $("contract").value.trim();
+  const prompt = `Company country: ${company}\nEmployee country: ${employee}\nContract / Offer text: ${contract}`;
+
+  $("run").disabled = true; $("status").textContent = " Running…";
+  $("responseCard").style.display="none"; $("stepsCard").style.display="none";
+  try{
+    const r = await fetch("/api/execute", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ prompt })
+    });
+    const data = await r.json();
+    if(data.status !== "ok"){
+      $("responseCard").style.display="block";
+      $("response").innerHTML = "<span class='err'>Error: "+esc(data.error||"unknown")+"</span>";
+    } else {
+      $("responseCard").style.display="block";
+      $("response").innerHTML = md(data.response || "");
+      renderSteps(data.steps || []);
+    }
+  }catch(e){
+    $("responseCard").style.display="block";
+    $("response").innerHTML = "<span class='err'>Request failed: "+esc(e.message)+"</span>";
+  }finally{
+    $("run").disabled=false; $("status").textContent="";
+  }
+}
+
+function renderSteps(steps){
+  if(!steps.length) return;
+  const box = $("steps"); box.innerHTML="";
+  steps.forEach((s,i)=>{
+    const d = document.createElement("details");
+    d.innerHTML =
+      "<summary><span class='mod'>"+esc(s.module)+"</span> · step "+(i+1)+"</summary>"+
+      "<div class='step-body'>"+
+        "<b>System prompt</b><pre>"+esc((s.prompt&&s.prompt.System_prompt)||"")+"</pre>"+
+        "<b>User prompt</b><pre>"+esc((s.prompt&&s.prompt.User_prompt)||"")+"</pre>"+
+        "<b>Response</b><pre>"+esc(JSON.stringify(s.response,null,2))+"</pre>"+
+      "</div>";
+    box.appendChild(d);
+  });
+  $("stepsCard").style.display="block";
+}
+
+$("run").addEventListener("click", run);
+</script>
+</body>
+</html>
