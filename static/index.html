@@ -30,6 +30,14 @@
   .mod { color: var(--acc); }
   .err { color:#ff7a7a; }
   .hint { color:var(--mut); font-size:13px; }
+  .instructions { color:var(--mut); font-size:13.5px; background:#141834; border:1px solid var(--line);
+    border-radius:10px; padding:12px 14px; margin:4px 0 10px; }
+  .instructions ul { margin:8px 0 4px; padding-left:20px; }
+  .instructions li { margin:2px 0; }
+  .instructions b { color:var(--ink); }
+  .fmt { background:#0b0e1c; border:1px solid var(--line); border-radius:8px; padding:8px 10px;
+    margin-top:8px; font-size:12px; white-space:pre; overflow-x:auto; color:var(--ink);
+    font-family: ui-monospace, Menlo, Consolas, monospace; }
 </style>
 </head>
 <body>
@@ -37,19 +45,22 @@
   <h1>⚖️ Contract Compliance Agent</h1>
   <p class="sub">Audit an international employment contract against both jurisdictions' labor law — and auto-fix it.</p>
 
-  <div class="row">
-    <div>
-      <label for="company">Company country</label>
-      <input id="company" placeholder="e.g. United States" value="United States" />
-    </div>
-    <div>
-      <label for="employee">Employee country</label>
-      <input id="employee" placeholder="e.g. Germany" value="Germany" />
-    </div>
+  <label for="prompt">Your request</label>
+  <div class="instructions">
+    In the box below, enter <b>all of the following together</b>:
+    <ul>
+      <li>The <b>company's country</b> — where the hiring company is based</li>
+      <li>The <b>employee's country</b> — where the worker is based</li>
+      <li>The full <b>contract or offer letter</b> text</li>
+    </ul>
+    Recommended format:
+    <pre class="fmt">Company country: United States
+Employee country: Germany
+Contract: &lt;paste the full contract text here&gt;</pre>
   </div>
-
-  <label for="contract">Contract / Offer text</label>
-  <textarea id="contract" placeholder="Paste the contract or offer letter here...">This Employment Agreement is between Acme Inc. (US) and the Employee (Germany). Compensation is EUR 1,200 per month. Either party may terminate this agreement effective immediately, with no prior notice.</textarea>
+  <textarea id="prompt" placeholder="Company country: ...&#10;Employee country: ...&#10;Contract: ...">Company country: United States
+Employee country: Germany
+Contract: This Employment Agreement is between Acme Inc. (US) and the Employee (Germany). Compensation is EUR 1,200 per month. Either party may terminate this agreement effective immediately, with no prior notice.</textarea>
 
   <button id="run">Run Agent</button>
   <span class="hint" id="status"></span>
@@ -94,10 +105,8 @@ function inline(s){
 }
 
 async function run(){
-  const company = $("company").value.trim();
-  const employee = $("employee").value.trim();
-  const contract = $("contract").value.trim();
-  const prompt = `Company country: ${company}\nEmployee country: ${employee}\nContract / Offer text: ${contract}`;
+  const prompt = $("prompt").value.trim();
+  if(!prompt){ $("status").textContent = " Please enter a request first."; return; }
 
   $("run").disabled = true; $("status").textContent = " Running…";
   $("responseCard").style.display="none"; $("stepsCard").style.display="none";
