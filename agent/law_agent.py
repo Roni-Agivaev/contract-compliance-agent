@@ -3,10 +3,11 @@
 One implementation, invoked twice (once per jurisdiction). The `module` name it
 logs under is "Company Law" or "Employee Law" so the trace matches the diagram.
 
-Each invocation:
-  1. retrieves statutes for its jurisdiction (ComplianceRetriever) -> logged step
-  2. looks up the country's minimum wage (MinimumWageTool)        -> logged step
-  3. one LLM call to identify breaches + proposed fixes            -> logged step
+Each invocation does three things but logs a SINGLE step (one LLM call):
+  1. retrieves statutes for its jurisdiction (ComplianceRetriever, no LLM)
+  2. looks up the country's minimum wage (MinimumWageTool, no LLM)
+  3. one LLM call to identify breaches + proposed fixes
+The retrieval sources and wage result are surfaced inside that step's response.
 """
 import json
 
@@ -25,38 +26,20 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
     """Run one law sub-agent. `module` = 'Company Law' or 'Employee Law'.
 
     Returns {"jurisdiction": <label>, "breaches": [...]}.
-    Appends retrieval, minimum-wage, and LLM steps to `steps`.
+    Appends ONE merged step to `steps` (the LLM breach-analysis call, with the
+    retrieval sources + minimum-wage tool result surfaced in its response).
     `country_code` may be None for a jurisdiction outside the indexed subset;
     the agent then runs on the ILO baseline only, using `country_label` for text.
     """
     label = (JURISDICTIONS.get(country_code, {}).get("label")
              or country_label or country_code or "the specified country")
 
-    # 1) retrieval (no LLM) --------------------------------------------------
+    # internal tools (no LLM): retrieval + minimum-wage lookup ----------------
     passages = retrieve(search_queries, country_code)
     context = format_context(passages)
-    steps.append(make_step(
-        module=module,
-        system_prompt="[ComplianceRetriever] Embed queries and query the "
-                      f"{label} statute namespace + ILO baseline in Pinecone.",
-        user_prompt="Queries: " + " | ".join(search_queries or []),
-        response={"retrieved": [
-            {"source": p["source"], "section": p["section"], "score": round(p["score"], 3)}
-            for p in passages
-        ]},
-    ))
-
-    # 2) minimum-wage tool (no LLM) -----------------------------------------
     wage = lookup_minimum_wage(country_code)
-    steps.append(make_step(
-        module=module,
-        system_prompt="[MinimumWageTool] Deterministic Supabase lookup of the "
-                      "2026 statutory minimum wage for the jurisdiction.",
-        user_prompt=f"country={label}",
-        response=wage,
-    ))
 
-    # 3) breach analysis (LLM) ----------------------------------------------
+    # single LLM call: breach analysis ---------------------------------------
     system = LAW_AGENT_SYSTEM.format(
         role=module, country=label, role_jurisdiction=role_jurisdiction,
     )
@@ -77,8 +60,18 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
         parsed = {"jurisdiction": label, "breaches": [], "_raw": raw}
         breaches = []
 
+    # one merged step for this sub-agent: the LLM call, plus the tool results
+    # (retrieved sources + minimum wage) surfaced for transparency.
+    response = {
+        "retrieved_sources": [
+            {"source": p["source"], "section": p["section"], "score": round(p["score"], 3)}
+            for p in passages
+        ],
+        "minimum_wage": wage,
+        "analysis": parsed,
+    }
     steps.append(make_step(
-        module=module, system_prompt=system, user_prompt=user, response=parsed,
+        module=module, system_prompt=system, user_prompt=user, response=response,
     ))
 
     return {"jurisdiction": label, "breaches": breaches}
