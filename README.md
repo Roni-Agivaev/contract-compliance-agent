@@ -40,46 +40,6 @@ Employee country: Germany
 Contract / Offer text: <the full contract text>
 ```
 
-## Setup
-
-### 1. Secrets — where the LLMod.ai key goes
-Copy `.env.example` to `.env` and fill in values. **Paste your new LLMod.ai key on the
-`LLMOD_API_KEY=` line:**
-```
-LLMOD_API_KEY=<your new LLMod.ai key here>
-PINECONE_API_KEY=...
-SUPABASE_URL=...
-SUPABASE_KEY=...
-```
-For production, add the **same variables** in Vercel → Project → Settings → Environment Variables.
-Keys are read only via `config.py`; nothing is hard-coded or committed (`.env` is gitignored).
-
-### 2. Install
-```bash
-python -m venv .venv
-.venv/Scripts/activate      # Windows;  source .venv/bin/activate on macOS/Linux
-pip install -r requirements.txt
-```
-
-### 3. One-time data setup
-Point the indexer at the folder of source PDFs (already in `../Data RAG/Data RAG`):
-```bash
-# Supabase: create the table (SQL in scripts/seed_minwage.py header), then:
-python scripts/seed_minwage.py
-# Pinecone: create the index + embed the statutes into per-jurisdiction namespaces:
-python scripts/index_corpus.py --data-dir "../Data RAG/Data RAG"
-```
-(Optional: add `ILO_1998_Declaration.pdf` to the data folder to populate the ILO baseline.)
-
-### 4. Run locally
-```bash
-uvicorn api.index:app --reload
-# open http://127.0.0.1:8000/
-```
-
-### 5. Fill in the students
-Edit `team_info.json` → replace the three `FILL IN NAME` / `FILL IN EMAIL` placeholders.
-
 ## Deploy (Vercel)
 1. Push this repo to GitHub.
 2. Import it in Vercel; the included `vercel.json` builds `api/index.py` with `@vercel/python`
