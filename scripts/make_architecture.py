@@ -46,7 +46,7 @@ def lbl(ax, x, y, text, color=INK):
 fig, ax = plt.subplots(figsize=(12, 7), dpi=150)
 ax.set_xlim(0, 12); ax.set_ylim(0, 7); ax.axis("off")
 
-ax.text(0.3, 6.7, "Contract Compliance Agent — Architecture (slide 6)",
+ax.text(0.3, 6.7, "Contract Compliance Agent — Architecture",
         fontsize=15, fontweight="bold", color=INK)
 
 # ── nodes ──
@@ -86,10 +86,12 @@ arrow(ax, (10.6, 4.05), (10.6, 5.05), color=GREEN)
 lbl(ax, 9.55, 4.55, "revise")
 lbl(ax, 11.15, 4.55, "≤ N iters", color=GREEN)
 
-# reflection -> supervisor (pass) and supervisor -> compliant
+# reflection -> supervisor: OUTER re-audit loop over the corrected contract
 arrow(ax, (9.1, 3.4), (4.6, 3.15), color=GREEN, rad=0.32)
-lbl(ax, 6.9, 2.5, "pass", color=GREEN)
+lbl(ax, 6.9, 2.42, "corrected contract — re-audit, ≤ 3 passes", color=GREEN)
+# supervisor -> compliant contract (only once no breaches remain)
 arrow(ax, (3.4, 3.05), (5.6, 1.75), color=GREEN, rad=0.05)
+lbl(ax, 3.9, 2.2, "0 breaches", color=GREEN)
 
 # ── data-store legend (empty bottom-left) ──
 ax.text(0.3, 1.75, "Data stores", fontsize=9, fontweight="bold", color=INK)

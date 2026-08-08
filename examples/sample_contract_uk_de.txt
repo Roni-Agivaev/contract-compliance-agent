@@ -1,0 +1,45 @@
+EMPLOYMENT AGREEMENT
+
+This Agreement is made on 15 January 2026 between Brightpath Analytics Ltd, a company registered in England and Wales with offices at 22 Fenchurch Avenue, London EC3M 5AD ("the Company"), and Mr. Lukas Berger, residing at Sendlinger Strasse 41, 80331 Munich, Germany ("the Employee").
+
+1. Position and Duties
+The Employee is engaged as a Data Engineer, reporting to the Head of Data. The Employee shall perform such duties as the Company may reasonably assign from time to time.
+
+2. Commencement
+Employment begins on 1 March 2026 and continues indefinitely unless terminated under this Agreement.
+
+3. Probationary Period
+The first twelve (12) months constitute a probationary period. During this period the Company may terminate the employment immediately and without notice.
+
+4. Place of Work
+The Employee shall work remotely from Munich, Germany. The Company may require attendance at its London office up to four times per year at the Company's expense.
+
+5. Working Hours
+Normal working hours are forty-five (45) hours per week, Monday to Friday. The Employee shall work such additional hours as the Company requires without further payment.
+
+6. Remuneration
+The Employee shall receive a gross salary of EUR 2,000 per month, payable on the last working day of each month.
+
+7. Overtime
+The salary set out in clause 6 covers all hours worked. No overtime premium or time off in lieu shall be payable in any circumstances.
+
+8. Annual Leave
+The Employee is entitled to fifteen (15) days of paid annual leave per calendar year. Any leave not taken by 31 December is forfeited without payment.
+
+9. Sickness
+The Employee shall notify the Company on the first day of any absence. The Company shall not be obliged to pay salary in respect of any period of sickness absence.
+
+10. Termination
+After the probationary period, either party may terminate this Agreement by giving one (1) week's written notice, irrespective of the Employee's length of service.
+
+11. Confidentiality
+The Employee shall not, during or after employment, disclose any confidential information of the Company, including source code, client lists, pricing and business plans.
+
+12. Post-Termination Restriction
+For three (3) years after termination the Employee shall not be employed by or provide services to any competing business anywhere in the world. No compensation shall be payable to the Employee in respect of this restriction.
+
+13. Governing Law
+This Agreement is governed exclusively by the laws of England and Wales. The Employee agrees that no provision of German employment law shall apply to this Agreement.
+
+Signed for and on behalf of Brightpath Analytics Ltd: ____________________
+Signed by the Employee, Lukas Berger: ____________________

@@ -23,7 +23,7 @@ from agent.trace import make_step, parse_json
 def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
                   contract_text: str, search_queries, steps: list,
                   country_label: str = None, work_country: str = None,
-                  stated_pay: dict = None) -> dict:
+                  stated_pay: dict = None, governs_workplace: bool = True) -> dict:
     """Run one law sub-agent. `module` = 'Company Law' or 'Employee Law'.
 
     Returns {"jurisdiction": <label>, "breaches": [...]}.
@@ -39,7 +39,17 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
     passages = retrieve(search_queries, country_code)
     context = format_context(passages)
     wage = lookup_minimum_wage(country_code)
-    wage_check = evaluate_wage(stated_pay, wage)
+    # A statutory minimum wage is territorial: it protects work performed in that
+    # country and does not follow a choice-of-law clause. Only the jurisdiction
+    # where the work is actually done gets a wage verdict.
+    if governs_workplace:
+        wage_check = evaluate_wage(stated_pay, wage)
+    else:
+        wage_check = {
+            "checked": False,
+            "reason": (f"the employee performs the work in {work_country}, not in {label}; "
+                       f"the {label} minimum wage is territorial and does not apply here"),
+        }
 
     # single LLM call: breach analysis ---------------------------------------
     system = LAW_AGENT_SYSTEM.format(
