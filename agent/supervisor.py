@@ -126,15 +126,22 @@ def run_pipeline(prompt: str) -> dict:
 
     company_steps, employee_steps = [], []
 
+    # where the work is actually performed — drives the applicability gate
+    work_country = plan.get("work_country") or employee_raw
+
     def _company():
         return run_law_agent("Company Law", "company's jurisdiction",
                              company_code, contract_text, queries,
-                             company_steps, country_label=company_raw)
+                             company_steps, country_label=company_raw,
+                             work_country=work_country,
+                             stated_pay=plan.get("stated_pay"))
 
     def _employee():
         return run_law_agent("Employee Law", "employee's jurisdiction",
                              employee_code, contract_text, queries,
-                             employee_steps, country_label=employee_raw)
+                             employee_steps, country_label=employee_raw,
+                             work_country=work_country,
+                             stated_pay=plan.get("stated_pay"))
 
     if same_jurisdiction:
         # Both countries identical: run one law agent (efficiency), reuse result.
@@ -150,9 +157,22 @@ def run_pipeline(prompt: str) -> dict:
         steps.extend(company_steps)
         steps.extend(employee_steps)
 
-    issues = _tag(company_result) + _tag(employee_result)
+    # 3) Supervisor validation gate: keep only genuine, citable violations.
+    #    Deterministic — no extra LLM call. Logged so the trace shows what each
+    #    law agent reported versus what the Supervisor accepted.
+    raw_issues = _tag(company_result) + _tag(employee_result)
+    issues, rejected = validate_breaches(raw_issues)
+    steps.append(make_step(
+        module="Supervisor",
+        system_prompt="[Validation gate] Deterministic review of the findings returned by "
+                      "Company Law and Employee Law. An entry is kept only if it self-declares "
+                      "as a violation, cites a real statute, and does not read as a compliance note.",
+        user_prompt=f"Received {len(raw_issues)} finding(s) from the law agents.",
+        response={"accepted": len(issues), "rejected": len(rejected),
+                  "rejected_details": rejected},
+    ))
 
-    # 3) Autonomous no-breach branch ----------------------------------------
+    # 4) Autonomous no-breach branch ----------------------------------------
     if not issues:
         jurisdictions = _join_jurisdictions(company_result, employee_result)
         response = (
@@ -163,7 +183,7 @@ def run_pipeline(prompt: str) -> dict:
         )
         return {"response": response, "steps": steps}
 
-    # 4) Editor <-> Reflection loop -----------------------------------------
+    # 5) Editor <-> Reflection loop -----------------------------------------
     draft = contract_text
     all_changes = []
     remaining = issues
@@ -171,17 +191,76 @@ def run_pipeline(prompt: str) -> dict:
         edited = run_editor(draft, remaining, steps, i)
         draft = edited["revised_contract"]
         all_changes.extend(edited["changes"])
-        verdict = run_reflection(draft, remaining, steps, i)
+        # pass the ORIGINAL contract so Reflection can catch regressions
+        verdict = run_reflection(draft, remaining, steps, i,
+                                 original_contract=contract_text)
         if verdict["pass"]:
             break
         remaining = verdict["remaining_issues"]
 
-    # 5) Supervisor finalizes output ----------------------------------------
+    # 6) Supervisor finalizes output ----------------------------------------
     response = _final_report(company_result, employee_result, issues, all_changes, draft)
     return {"response": response, "steps": steps}
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
+# Phrases that reveal an entry is NOT a violation — either the model hedging
+# ("no breach can be established") or affirming compliance ("within the limits
+# of BGB 622(3)"). Backstop for when the model sets is_violation wrongly.
+_NON_BREACH_MARKERS = (
+    # hedging / nothing established
+    "no concrete breach", "cannot be established", "could not be established",
+    "could not be verified", "could not be retrieved", "not supported by",
+    "do not include any", "do not contain any", "does not contain any",
+    "no breach can be", "unable to verify", "record is unavailable",
+    "cannot be confirmed", "no breach is established",
+    # affirming the clause is fine
+    "within the limits", "is consistent with", "complies with", "is compliant",
+    "are within the", "is permitted", "is allowed", "no breach", "not a breach",
+    "meets the requirement", "satisfies the requirement", "is lawful",
+    "does not violate", "no violation",
+)
+
+_BAD_CITATIONS = {"", "n/a", "none", "null", "minimum-wage record",
+                  "minimum_wage record", "wage check", "not applicable"}
+
+
+def validate_breaches(issues: list) -> tuple:
+    """Supervisor's central quality gate over the law agents' findings.
+
+    Deterministic (no LLM). An entry survives only if it self-declares as a
+    violation, carries a real statute citation, and does not read as a
+    compliance note. Returns (accepted, rejected).
+    """
+    accepted, rejected = [], []
+    for b in issues:
+        if not isinstance(b, dict):
+            rejected.append({"reason": "malformed entry", "entry": str(b)[:120]})
+            continue
+
+        # 1) self-declaration: the agent must assert this is a violation
+        if b.get("is_violation") is False:
+            rejected.append({"reason": "is_violation=false", "clause": b.get("clause", "")[:80]})
+            continue
+
+        # 2) must cite a real statute
+        cite = (b.get("law_citation") or "").strip().lower()
+        if cite in _BAD_CITATIONS:
+            rejected.append({"reason": "no usable law_citation", "clause": b.get("clause", "")[:80]})
+            continue
+
+        # 3) backstop: text that reads as a compliance note is not a breach
+        blob = f"{b.get('issue', '')} {b.get('violated_requirement', '')} {b.get('clause', '')}".lower()
+        marker = next((m for m in _NON_BREACH_MARKERS if m in blob), None)
+        if marker:
+            rejected.append({"reason": f"reads as compliant ('{marker}')",
+                             "clause": b.get("clause", "")[:80]})
+            continue
+
+        accepted.append(b)
+    return accepted, rejected
+
+
 def _describe(raw) -> str:
     """Readable label for a country that failed the supported-jurisdiction check."""
     s = (raw or "").strip()

@@ -1,6 +1,6 @@
-"""Seed the Supabase `minimum_wage` table (run once).
+"""Seed the Supabase reference tables (run once, or to refresh rates).
 
-Create the table first (SQL, run in the Supabase SQL editor):
+Create BOTH tables first — paste this into the Supabase SQL editor and Run:
 
     create table if not exists minimum_wage (
         country  text primary key,
@@ -10,12 +10,18 @@ Create the table first (SQL, run in the Supabase SQL editor):
         period   text
     );
 
+    create table if not exists currency_rates (
+        currency   text primary key,
+        to_usd     numeric not null,
+        updated_on date
+    );
+
 Then run:
     python scripts/seed_minwage.py
 
-Values below are seed figures for the supported jurisdictions (verify/update to
-the latest 2026 figures as needed). The MinimumWageTool reads this table by the
-country label used in config.JURISDICTIONS.
+`to_usd` = how many US dollars one unit of that currency is worth.
+NOTE: these are STATIC reference rates, not a live FX feed. Refresh them by
+editing RATES below and re-running this script.
 """
 import os
 import sys
@@ -37,6 +43,14 @@ SEED = [
     {"country": "Uzbekistan", "currency": "UZS", "amount": 1271000, "unit": "month", "period": "month"},
 ]
 
+# Currencies of the four supported jurisdictions. Static reference rates.
+RATES = [
+    {"currency": "USD", "to_usd": 1.00, "updated_on": "2026-08-08"},
+    {"currency": "EUR", "to_usd": 1.09, "updated_on": "2026-08-08"},
+    {"currency": "GBP", "to_usd": 1.27, "updated_on": "2026-08-08"},
+    {"currency": "ILS", "to_usd": 0.27, "updated_on": "2026-08-08"},
+]
+
 
 def main():
     if not (SUPABASE_URL and SUPABASE_KEY):
@@ -44,8 +58,18 @@ def main():
         sys.exit(1)
     from supabase import create_client
     client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
     res = client.table("minimum_wage").upsert(SEED).execute()
     print(f"Upserted {len(res.data or SEED)} rows into minimum_wage.")
+
+    try:
+        res = client.table("currency_rates").upsert(RATES).execute()
+        print(f"Upserted {len(res.data or RATES)} rows into currency_rates.")
+    except Exception as e:
+        print("currency_rates upsert FAILED -- did you create the table? "
+              "See the SQL at the top of this file.")
+        print(f"  {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -16,36 +16,14 @@ from langchain_core.prompts import ChatPromptTemplate
 from config import get_llm, JURISDICTIONS
 from agent.prompts import LAW_AGENT_SYSTEM
 from agent.retriever import retrieve, format_context
-from agent.tools import lookup_minimum_wage
+from agent.tools import lookup_minimum_wage, evaluate_wage
 from agent.trace import make_step, parse_json
-
-
-# Phrases that mark a "finding" as a non-breach (the model hedging rather than
-# reporting an actual violation). Such items are dropped before they reach the
-# Editor, so they cannot inflate the breach list or trigger pointless rewrites.
-_NON_BREACH_MARKERS = (
-    "no concrete breach", "cannot be established", "could not be established",
-    "could not be verified", "could not be retrieved", "not supported by",
-    "do not include any", "do not contain any", "does not contain any",
-    "no breach can be", "unable to verify", "record is unavailable",
-    "not available", "no statutory", "cannot be confirmed",
-)
-
-
-def _is_real_breach(b: dict) -> bool:
-    """Drop hedged non-findings: they must have a citation and assert a violation."""
-    if not isinstance(b, dict):
-        return False
-    cite = (b.get("law_citation") or "").strip().lower()
-    if not cite or cite in {"n/a", "none", "null", "minimum-wage record", "minimum_wage record"}:
-        return False
-    blob = f"{b.get('issue', '')} {b.get('clause', '')}".lower()
-    return not any(marker in blob for marker in _NON_BREACH_MARKERS)
 
 
 def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
                   contract_text: str, search_queries, steps: list,
-                  country_label: str = None) -> dict:
+                  country_label: str = None, work_country: str = None,
+                  stated_pay: dict = None) -> dict:
     """Run one law sub-agent. `module` = 'Company Law' or 'Employee Law'.
 
     Returns {"jurisdiction": <label>, "breaches": [...]}.
@@ -61,15 +39,17 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
     passages = retrieve(search_queries, country_code)
     context = format_context(passages)
     wage = lookup_minimum_wage(country_code)
+    wage_check = evaluate_wage(stated_pay, wage)
 
     # single LLM call: breach analysis ---------------------------------------
     system = LAW_AGENT_SYSTEM.format(
         role=module, country=label, role_jurisdiction=role_jurisdiction,
+        work_country=(work_country or label),
     )
     user = (
         f"CONTRACT:\n{contract_text}\n\n"
         f"RETRIEVED {label.upper()} LAW PASSAGES:\n{context}\n\n"
-        f"MINIMUM WAGE RECORD:\n{json.dumps(wage)}\n\n"
+        f"WAGE CHECK (already computed — authoritative, do not recalculate):\n{json.dumps(wage_check)}\n\n"
         f"Identify breaches for {label} only. Return JSON."
     )
     chain = ChatPromptTemplate.from_messages(
@@ -83,14 +63,9 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
         parsed = {"jurisdiction": label, "breaches": [], "_raw": raw}
         breaches = []
 
-    # keep only genuine, citable violations
-    filtered = [b for b in breaches if _is_real_breach(b)]
-    dropped = len(breaches) - len(filtered)
-    breaches = filtered
-    if isinstance(parsed, dict):
-        parsed["breaches"] = breaches
-        if dropped:
-            parsed["_dropped_non_breaches"] = dropped
+    # NOTE: breaches are returned RAW here. The Supervisor validates and filters
+    # them centrally (see agent/supervisor.py: validate_breaches), so the trace
+    # shows what this agent actually said versus what the Supervisor accepted.
 
     # one merged step for this sub-agent: the LLM call, plus the tool results
     # (retrieved sources + minimum wage) surfaced for transparency.
@@ -100,6 +75,7 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
             for p in passages
         ],
         "minimum_wage": wage,
+        "wage_check": wage_check,
         "analysis": parsed,
     }
     steps.append(make_step(
