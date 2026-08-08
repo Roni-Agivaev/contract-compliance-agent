@@ -26,7 +26,7 @@ EMBEDDING_DIMENSION = 1536
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 100
 TOP_K = 6                 # chunks retrieved per law agent, before dedup
-MAX_REFLECTION_ITERS = 2  # Editor <-> Reflection loop cap (slide 6: "<= N iterations")
+MAX_REFLECTION_ITERS = 3  # Editor <-> Reflection loop cap (slide 6: "<= N iterations")
 
 PINECONE_INDEX_NAME = "contract-compliance"
 ILO_NAMESPACE = "ilo_baseline"   # universal floor, queried alongside every jurisdiction

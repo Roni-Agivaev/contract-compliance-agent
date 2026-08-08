@@ -1,136 +1,93 @@
-"""Static payload for GET /api/agent_info.
+"""Payload for GET /api/agent_info.
 
-Includes a fully worked example (slide-7 scenario: US company hiring a
-Germany-based developer with a zero-notice termination clause that violates
-German BGB 622) with its full step trace.
+description / purpose / prompt_template are defined here; prompt_examples are
+loaded from agent_examples.json, which is generated from REAL runs of the agent
+by scripts/build_agent_examples.py (never hand-written), so the documented
+behaviour always matches what POST /api/execute actually returns.
 """
+import json
+import os
 
-_PROMPT_TEMPLATE = (
-    "Company country: <where the hiring company is based, e.g. United States>\n"
-    "Employee country: <where the worker is based, e.g. Germany>\n"
-    "Contract / Offer text: <paste the full contract or offer letter as text>"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+EXAMPLES_PATH = os.path.join(ROOT, "agent_examples.json")
+
+DESCRIPTION = (
+    "A multi-agent Contract Compliance Agent for international hiring. You give it an "
+    "employment contract or offer letter as TEXT together with the company's country and the "
+    "employee's country; it audits the contract against BOTH jurisdictions' labor law using "
+    "retrieval-augmented generation over official statutes, then rewrites every non-compliant "
+    "clause and returns the corrected contract with a plain-English log of what changed and why."
+    "\n\n"
+    "How it works (the module names below match the architecture diagram returned by "
+    "GET /api/model_architecture and the `module` field of every step in the trace):\n"
+    "1. Supervisor — reads the two jurisdictions from the prompt (or infers them from the "
+    "contract when they are not stated), checks the request is in scope, confirms both countries "
+    "are in the indexed legal corpus, extracts the stated pay, and plans the legal search queries.\n"
+    "2. Company Law and Employee Law — two sub-agents running in parallel, one per jurisdiction. "
+    "Each retrieves the statutes for its country from its own Pinecone namespace, applies an "
+    "applicability gate (a country's labor law generally governs only where the work is performed), "
+    "receives a deterministically computed minimum-wage verdict, and returns breaches with citations "
+    "and proposed fixes.\n"
+    "3. Supervisor validation gate — a deterministic pass over both findings lists that keeps only "
+    "entries which self-declare as a violation and cite a real statute, so compliance notes never "
+    "reach the Editor or inflate the report.\n"
+    "4. Editor and Reflection — the Editor rewrites the flagged clauses (it may only raise a term to "
+    "meet the law, never reduce a benefit), and Reflection verifies each issue was resolved without "
+    "introducing a regression, looping back to the Editor for at most two iterations.\n"
+    "If no breaches survive the validation gate, the Supervisor autonomously returns the original "
+    "contract unchanged with a 'No breaches found' message and never invokes the Editor.\n\n"
+    "What it CAN do: audit and rewrite employment contracts for the United States, United Kingdom, "
+    "Germany and Israel; cite the specific statute behind each finding; compare pay across "
+    "currencies and hourly/monthly/annual units against the statutory minimum wage; and return a "
+    "full step-by-step execution trace.\n\n"
+    "What it CANNOT do: it is not legal advice and does not replace a qualified employment lawyer; "
+    "it does not send, sign, file or store contracts; it reasons only from the indexed statutes and "
+    "not from the open internet; and it refuses contracts where either jurisdiction is outside the "
+    "supported list, returning a structured error instead of guessing."
 )
 
-_EXAMPLE_PROMPT = (
-    "Company country: United States\n"
-    "Employee country: Germany\n"
-    "Contract / Offer text: This Employment Agreement is between Acme Inc. (US) and "
-    "the Employee (Germany). Compensation is EUR 1,200 per month. Either party may "
-    "terminate this agreement effective immediately, with no prior notice."
+PURPOSE = (
+    "Cut the time and legal risk of international onboarding by automatically finding and fixing "
+    "labor-law violations in cross-border employment contracts before they are sent to a candidate."
 )
 
-_EXAMPLE_RESPONSE = (
-    "## ⚖️ Compliance Review — Contract Corrected\n\n"
-    "**Jurisdictions reviewed:** United States and Germany\n"
-    "**Breaches found:** 2  ·  **Edits applied:** 2\n\n"
-    "### Breaches found\n"
-    "- **[HIGH] Germany** — A zero-notice termination clause is void; German law sets "
-    "statutory minimum notice periods that scale with tenure. _(cite: BGB 622)_\n"
-    "- **[HIGH] Germany** — Monthly pay of EUR 1,200 falls below the German statutory "
-    "minimum wage for full-time work. _(cite: German minimum wage 2026)_\n\n"
-    "### Changes made (plain English)\n"
-    "- **Termination clause**: Replaced instant termination with the statutory notice "
-    "period under German law — _resolves BGB 622 violation_\n"
-    "- **Compensation clause**: Raised monthly pay to meet the German statutory minimum "
-    "wage — _resolves minimum-wage breach_\n\n"
-    "### ✅ Corrected contract\n\n"
-    "This Employment Agreement is between Acme Inc. (US) and the Employee (Germany). "
-    "Compensation is set at no less than the German statutory minimum wage for full-time "
-    "work. Either party may terminate with the statutory notice period required under "
-    "German law (BGB 622), scaling with the employee's tenure."
-)
+PROMPT_TEMPLATE = {
+    "template": (
+        "Company country: <where the hiring company is based, e.g. United Kingdom>\n"
+        "Employee country: <where the employee lives and performs the work, e.g. Germany>\n"
+        "Contract / Offer text: <paste the full contract or offer letter as plain text>"
+    ),
+    "example": (
+        "Company country: United Kingdom\n"
+        "Employee country: Germany\n"
+        "Contract / Offer text: EMPLOYMENT AGREEMENT between ABC Technologies Ltd (London) and "
+        "Max Mustermann (Berlin). 1. Salary: EUR 68,000 gross per year. 2. Probation: the first "
+        "twelve months, during which the Company may terminate immediately without notice. "
+        "3. Vacation: 20 days of paid annual leave..."
+    ),
+    "notes": [
+        "Both countries must be among the supported jurisdictions: United States, United Kingdom, "
+        "Germany, Israel. Anything else returns a structured error.",
+        "If a country is omitted the Supervisor will try to infer it from the contract text.",
+        "The contract must be supplied as text; file uploads are not accepted.",
+    ],
+}
 
-_EXAMPLE_STEPS = [
-    {
-        "module": "Supervisor",
-        "prompt": {
-            "System_prompt": "You are the Supervisor ... decide in_scope and plan legal search queries. JSON only.",
-            "User_prompt": "Company country: United States\nEmployee country: Germany\nContract text: ... no prior notice.",
-        },
-        "response": {
-            "in_scope": True, "reason": None,
-            "company_country": "United States", "employee_country": "Germany",
-            "search_queries": ["minimum wage Germany", "notice period termination BGB",
-                                "working hours overtime", "paid annual leave"],
-        },
-    },
-    {
-        "module": "Company Law",
-        "prompt": {"System_prompt": "You are the Company Law sub-agent ... United States ... JSON only.",
-                    "User_prompt": "CONTRACT ... RETRIEVED US LAW PASSAGES ... MINIMUM WAGE RECORD ..."},
-        "response": {
-            "retrieved_sources": [{"source": "US Fair Labor Standards Act (FLSA)", "section": "§206", "score": 0.41}],
-            "minimum_wage": {"found": True, "country": "United States", "amount": 7.25, "currency": "USD", "unit": "hour"},
-            "analysis": {"jurisdiction": "United States", "breaches": []},
-        },
-    },
-    {
-        "module": "Employee Law",
-        "prompt": {"System_prompt": "You are the Employee Law sub-agent ... Germany ... JSON only.",
-                    "User_prompt": "CONTRACT ... RETRIEVED GERMANY LAW PASSAGES ... MINIMUM WAGE RECORD ..."},
-        "response": {
-            "retrieved_sources": [{"source": "German Civil Code (BGB)", "section": "§622", "score": 0.63}],
-            "minimum_wage": {"found": True, "country": "Germany", "amount": 12.82, "currency": "EUR", "unit": "hour"},
-            "analysis": {"jurisdiction": "Germany", "breaches": [
-                {"clause": "Either party may terminate ... with no prior notice.",
-                 "issue": "Zero-notice termination is void under German statutory notice rules.",
-                 "severity": "high", "law_citation": "BGB 622",
-                 "proposed_fix": "Apply the statutory notice period under BGB 622, scaling with tenure."},
-                {"clause": "EUR 1,200 per month",
-                 "issue": "Below the German statutory minimum wage for full-time work.",
-                 "severity": "high", "law_citation": "German minimum wage 2026",
-                 "proposed_fix": "Raise pay to at least the statutory minimum wage."},
-            ]},
-        },
-    },
-    {
-        "module": "Editor (iteration 1)",
-        "prompt": {"System_prompt": "You are the Editor ... rewrite fixing every issue. JSON only.",
-                    "User_prompt": "CONTRACT ... ISSUES TO FIX (JSON) ..."},
-        "response": {"revised_contract": "... statutory notice period required under German law (BGB 622) ...",
-                      "changes": [
-                          {"clause": "Termination clause", "change": "Replaced instant termination with statutory notice.", "why": "BGB 622"},
-                          {"clause": "Compensation clause", "change": "Raised pay to the German minimum wage.", "why": "minimum wage 2026"},
-                      ]},
-    },
-    {
-        "module": "Reflection (iteration 1)",
-        "prompt": {"System_prompt": "You are the Reflection reviewer ... verify each issue resolved. JSON only.",
-                    "User_prompt": "REVISED CONTRACT ... ISSUES THAT HAD TO BE FIXED (JSON) ..."},
-        "response": {"pass": True, "remaining_issues": []},
-    },
-]
+SUPPORTED_JURISDICTIONS = ["United States", "United Kingdom", "Germany", "Israel"]
+
+
+def _load_examples():
+    try:
+        with open(EXAMPLES_PATH, encoding="utf-8") as f:
+            return json.load(f).get("prompt_examples", [])
+    except (OSError, ValueError):
+        return []
+
 
 AGENT_INFO = {
-    "description": (
-        "A multi-agent Contract Compliance Agent for international hiring. It takes an "
-        "employment contract or offer letter as TEXT, plus the company's country and the "
-        "employee's country, and reviews the contract against BOTH jurisdictions' labor "
-        "law using retrieval-augmented generation (RAG) over official statutes, plus a "
-        "2026 minimum-wage check.\n\n"
-        "Architecture (slide 6): a Supervisor orchestrates the flow; Company Law and "
-        "Employee Law sub-agents run in parallel, each scanning its jurisdiction's statutes "
-        "and flagging breaches with citations and fixes; an Editor rewrites the flagged "
-        "clauses and a Reflection reviewer verifies the fixes in a short loop. If no "
-        "breaches are found, the Supervisor autonomously returns the original contract with "
-        "a 'No breaches found' message.\n\n"
-        "What it CAN do: audit and rewrite contracts for US, UK, Germany, and Israel "
-        "jurisdictions (plus a universal ILO baseline and a global minimum-wage table); cite "
-        "the specific statute behind each finding; return a full step-by-step trace.\n"
-        "What it CANNOT do: it is not legal advice; it does not send, sign, or file "
-        "anything; and it only reasons from the indexed statutes, not the open internet."
-    ),
-    "purpose": (
-        "Cut the time and legal risk of international onboarding by automatically catching "
-        "and fixing labor-law violations in cross-border employment contracts before they "
-        "are sent."
-    ),
-    "prompt_template": {"template": _PROMPT_TEMPLATE},
-    "prompt_examples": [
-        {
-            "prompt": _EXAMPLE_PROMPT,
-            "full_response": _EXAMPLE_RESPONSE,
-            "steps": _EXAMPLE_STEPS,
-        }
-    ],
+    "description": DESCRIPTION,
+    "purpose": PURPOSE,
+    "supported_jurisdictions": SUPPORTED_JURISDICTIONS,
+    "prompt_template": PROMPT_TEMPLATE,
+    "prompt_examples": _load_examples(),
 }
