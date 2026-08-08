@@ -20,6 +20,29 @@ from agent.tools import lookup_minimum_wage
 from agent.trace import make_step, parse_json
 
 
+# Phrases that mark a "finding" as a non-breach (the model hedging rather than
+# reporting an actual violation). Such items are dropped before they reach the
+# Editor, so they cannot inflate the breach list or trigger pointless rewrites.
+_NON_BREACH_MARKERS = (
+    "no concrete breach", "cannot be established", "could not be established",
+    "could not be verified", "could not be retrieved", "not supported by",
+    "do not include any", "do not contain any", "does not contain any",
+    "no breach can be", "unable to verify", "record is unavailable",
+    "not available", "no statutory", "cannot be confirmed",
+)
+
+
+def _is_real_breach(b: dict) -> bool:
+    """Drop hedged non-findings: they must have a citation and assert a violation."""
+    if not isinstance(b, dict):
+        return False
+    cite = (b.get("law_citation") or "").strip().lower()
+    if not cite or cite in {"n/a", "none", "null", "minimum-wage record", "minimum_wage record"}:
+        return False
+    blob = f"{b.get('issue', '')} {b.get('clause', '')}".lower()
+    return not any(marker in blob for marker in _NON_BREACH_MARKERS)
+
+
 def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
                   contract_text: str, search_queries, steps: list,
                   country_label: str = None) -> dict:
@@ -59,6 +82,15 @@ def run_law_agent(module: str, role_jurisdiction: str, country_code: str,
     except ValueError:
         parsed = {"jurisdiction": label, "breaches": [], "_raw": raw}
         breaches = []
+
+    # keep only genuine, citable violations
+    filtered = [b for b in breaches if _is_real_breach(b)]
+    dropped = len(breaches) - len(filtered)
+    breaches = filtered
+    if isinstance(parsed, dict):
+        parsed["breaches"] = breaches
+        if dropped:
+            parsed["_dropped_non_breaches"] = dropped
 
     # one merged step for this sub-agent: the LLM call, plus the tool results
     # (retrieved sources + minimum wage) surfaced for transparency.

@@ -31,7 +31,13 @@ Do not write the audit or the contract here. JSON only."""
 LAW_AGENT_SYSTEM = """You are the {role} sub-agent. You check an employment contract against the labor law of {country} (the {role_jurisdiction}).
 You are given: the contract text, retrieved passages from that country's statutes (your ONLY source of law — do not invent laws), and a minimum-wage record for the country.
 
-Identify concrete breaches or missing statutory terms in the contract for THIS jurisdiction only. Ground every finding in the retrieved passages or the minimum-wage record; if the passages do not support a concern, do not raise it. Use the minimum-wage record to check pay clauses.
+Report ONLY actual, concrete violations of {country} law. Apply these rules strictly:
+1. Every breach MUST cite a specific provision that appears in the retrieved passages. If you cannot point to such a provision, DO NOT report it.
+2. NEVER output a finding whose text says that no breach can be established, that the passages do not cover the topic, that something could not be verified, or that a rule "may" apply. Such items are NOT breaches — omit them entirely.
+3. The contract being SILENT on a topic is a breach ONLY if the retrieved law explicitly requires that term to be stated in the contract. Do not demand that the contract restate or quote statutes it is already subject to.
+4. MINIMUM WAGE: use the record only if it has "found": true. If it is missing, not found, or errored, SKIP the wage check completely and report nothing about wages or about the record being unavailable.
+5. Judge the contract's substance, not its wording style. Do not raise findings that merely ask for more detail, clearer phrasing, or extra explanatory language where the term itself is lawful.
+6. Returning an EMPTY breaches list is a correct and expected result for a compliant contract. Do not manufacture findings to appear thorough.
 
 Return ONLY a JSON object:
 {{
@@ -60,8 +66,13 @@ Return ONLY a JSON object:
 }
 JSON only."""
 
-REFLECTION_SYSTEM = """You are the Reflection reviewer. You verify that a revised employment contract actually resolves every issue in the provided list, and that no issue remains unaddressed.
-Be strict but do not invent new requirements beyond the issue list.
+REFLECTION_SYSTEM = """You are the Reflection reviewer. You verify that a revised employment contract actually resolves every issue in the provided list.
+
+Rules:
+1. An issue counts as RESOLVED if the revised contract addresses it in substance. Do not demand exact wording.
+2. Do NOT invent new requirements or raise issues that are not in the provided list.
+3. If an issue cannot be fixed by editing the contract text (for example it depends on external data that was unavailable, or it states that no breach could be established), treat it as resolved and do not keep it open.
+4. Only keep an issue open when the revised contract still clearly and substantively fails to address it.
 
 Return ONLY a JSON object:
 {
