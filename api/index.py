@@ -67,6 +67,15 @@ def execute(req: ExecuteRequest):
     try:
         from agent.supervisor import run_pipeline
         result = run_pipeline(req.prompt)
+        # the pipeline returns an "error" key when it cannot serve the request
+        # (e.g. a jurisdiction outside the indexed set)
+        if result.get("error"):
+            return JSONResponse({
+                "status": "error",
+                "error": result["error"],
+                "response": None,
+                "steps": result.get("steps", []),
+            })
         return JSONResponse({
             "status": "ok",
             "error": None,

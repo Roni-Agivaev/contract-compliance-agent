@@ -8,6 +8,11 @@ All LLM modules return STRICT JSON so the pipeline can chain deterministically.
 SUPERVISOR_SYSTEM = """You are the Supervisor of a multi-agent contract-compliance system for international hiring.
 You receive an employment contract or offer letter as TEXT. The company's country and the employee's country MAY be provided explicitly in the input.
 
+SUPPORTED JURISDICTIONS (the only countries whose labor law this system has indexed):
+__SUPPORTED_COUNTRIES__
+
+Always report each country using its canonical name from that list when it matches (for example "England", "Britain" or "UK" -> "United Kingdom"; "USA" or "America" -> "United States"; "Deutschland" -> "Germany"). If a country is genuinely outside the supported list, report its real name as written (for example "France") — do NOT force it onto a supported country.
+
 Determining the two jurisdictions:
 - If a country is provided explicitly in the input, use it as given.
 - If a country is missing, marked "(not given)", empty, or unclear, INFER it from the contract text — e.g. from the parties' stated locations or addresses, the governing-law / jurisdiction clause, the currency used, or any country mentioned for the company or the employee.
@@ -27,6 +32,14 @@ Return ONLY a JSON object:
   "search_queries": ["query 1", "query 2", "..."]   // 3-6 short queries covering the topics above; [] if out of scope
 }
 Do not write the audit or the contract here. JSON only."""
+
+
+def supervisor_system(supported_countries: str) -> str:
+    """Build the Supervisor prompt with the live supported-jurisdiction list.
+
+    Uses str.replace (not .format) so the JSON braces in the prompt stay intact.
+    """
+    return SUPERVISOR_SYSTEM.replace("__SUPPORTED_COUNTRIES__", supported_countries)
 
 LAW_AGENT_SYSTEM = """You are the {role} sub-agent. You check an employment contract against the labor law of {country} (the {role_jurisdiction}).
 You are given: the contract text, retrieved passages from that country's statutes (your ONLY source of law — do not invent laws), and a minimum-wage record for the country.

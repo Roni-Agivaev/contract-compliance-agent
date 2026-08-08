@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from langchain_core.prompts import ChatPromptTemplate
 
 from config import get_llm, normalize_country, JURISDICTIONS, MAX_REFLECTION_ITERS
-from agent.prompts import SUPERVISOR_SYSTEM
+from agent.prompts import supervisor_system
 from agent.law_agent import run_law_agent
 from agent.editor import run_editor
 from agent.reflection import run_reflection
@@ -46,12 +46,24 @@ def parse_input(prompt: str):
 
 
 # ── pipeline ────────────────────────────────────────────────────────────────────
+def supported_countries_list() -> str:
+    """Canonical names of the jurisdictions whose law is indexed."""
+    return ", ".join(cfg["label"] for cfg in JURISDICTIONS.values())
+
+
 def run_pipeline(prompt: str) -> dict:
-    """Execute the full agent. Returns {"response": str, "steps": [...]}"""
+    """Execute the full agent.
+
+    Returns {"response": str, "steps": [...]} normally, or
+    {"error": str, "steps": [...]} when the request cannot be served
+    (e.g. an unsupported jurisdiction).
+    """
     steps = []
     company_raw, employee_raw, contract_text = parse_input(prompt)
+    supported = supported_countries_list()
 
-    # 1) Supervisor: scope-guard + query planning ---------------------------
+    # 1) Supervisor: scope-guard + jurisdiction resolution + query planning --
+    system = supervisor_system(supported)
     sup_user = (
         f"Company country: {company_raw or '(not given)'}\n"
         f"Employee country: {employee_raw or '(not given)'}\n"
@@ -59,14 +71,14 @@ def run_pipeline(prompt: str) -> dict:
     )
     chain = ChatPromptTemplate.from_messages(
         [("system", "{system}"), ("human", "{user}")]) | get_llm()
-    raw = chain.invoke({"system": SUPERVISOR_SYSTEM, "user": sup_user}).content
+    raw = chain.invoke({"system": system, "user": sup_user}).content
     try:
         plan = parse_json(raw)
     except ValueError:
         plan = {"in_scope": True, "reason": None,
                 "company_country": company_raw, "employee_country": employee_raw,
                 "search_queries": []}
-    steps.append(make_step("Supervisor", SUPERVISOR_SYSTEM, sup_user, plan))
+    steps.append(make_step("Supervisor", system, sup_user, plan))
 
     if not plan.get("in_scope", True):
         reason = plan.get("reason") or "This request is outside the scope of contract compliance review."
@@ -86,6 +98,22 @@ def run_pipeline(prompt: str) -> dict:
 
     company_code = normalize_country(company_raw)
     employee_code = normalize_country(employee_raw)
+
+    # 2) Jurisdiction gate: both countries must be in the indexed RAG set.
+    #    Deterministic (no LLM) — the Supervisor stops here if either is unsupported.
+    unsupported = []
+    if company_code is None:
+        unsupported.append(f"company country: {_describe(company_raw)}")
+    if employee_code is None:
+        unsupported.append(f"employee country: {_describe(employee_raw)}")
+    if unsupported:
+        return {
+            "error": (
+                "Unsupported jurisdiction — " + "; ".join(unsupported) + ". "
+                f"This agent only supports contracts where BOTH countries are among: {supported}."
+            ),
+            "steps": steps,
+        }
 
     # 2) Company Law || Employee Law (in parallel) --------------------------
     same_jurisdiction = (
@@ -154,6 +182,14 @@ def run_pipeline(prompt: str) -> dict:
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────────
+def _describe(raw) -> str:
+    """Readable label for a country that failed the supported-jurisdiction check."""
+    s = (raw or "").strip()
+    if not s or s.lower() in {"null", "none", "(not given)", "unknown"}:
+        return "could not be determined from the input or the contract"
+    return f"'{s}' is not supported"
+
+
 def _tag(result: dict) -> list:
     out = []
     for b in result.get("breaches", []):
