@@ -50,7 +50,7 @@ def model_architecture():
     if os.path.exists(png):
         return FileResponse(png, media_type="image/png")
     return JSONResponse(
-        {"error": "architecture.png not found; run scripts/make_architecture.py"},
+        {"error": "static/architecture.png is missing from the deployment"},
         status_code=404,
     )
 
