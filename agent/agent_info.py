@@ -69,15 +69,7 @@ PROMPT_TEMPLATE = {
         "10. Termination: After the probationary period, either party may terminate by giving "
         "one (1) week's written notice..."
     ),
-    "notes": [
-        "Both countries must be among the supported jurisdictions: United States, United Kingdom, "
-        "Germany, Israel. Anything else returns a structured error.",
-        "If a country is omitted the Supervisor will try to infer it from the contract text.",
-        "The contract must be supplied as text; file uploads are not accepted.",
-    ],
 }
-
-SUPPORTED_JURISDICTIONS = ["United States", "United Kingdom", "Germany", "Israel"]
 
 
 def _load_examples():
@@ -88,10 +80,10 @@ def _load_examples():
         return []
 
 
+# Exactly the four keys the assignment's response format specifies.
 AGENT_INFO = {
     "description": DESCRIPTION,
     "purpose": PURPOSE,
-    "supported_jurisdictions": SUPPORTED_JURISDICTIONS,
     "prompt_template": PROMPT_TEMPLATE,
     "prompt_examples": _load_examples(),
 }

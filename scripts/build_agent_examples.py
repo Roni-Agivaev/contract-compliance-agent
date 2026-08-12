@@ -71,13 +71,16 @@ def corrected_contract(response: str):
     return m.group(1).strip() if m else None
 
 
-def build_example(result, prompt, title, note):
+def build_example(result, prompt, title=None, note=None):
+    """One prompt_examples entry.
+
+    Exactly the three keys the assignment specifies — prompt, full_response,
+    steps. `title`/`note` are accepted for callers' readability but deliberately
+    NOT emitted, so the payload matches the documented response format.
+    """
     return {
-        "title": title,
-        "note": note,
         "prompt": prompt,
         "full_response": result.get("response") or result.get("error"),
-        "status": result.get("status"),
         "steps": clean_steps(result.get("steps")),
     }
 
