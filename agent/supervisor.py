@@ -14,7 +14,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import get_llm, normalize_country, JURISDICTIONS, MAX_REFLECTION_ITERS
+from config import (
+    get_llm, normalize_country, JURISDICTIONS, MAX_REFLECTION_ITERS,
+    FIXED_SEARCH_QUERIES, USE_FIXED_QUERIES,
+)
 from agent.prompts import supervisor_system
 from agent.law_agent import run_law_agent
 from agent.editor import run_editor
@@ -79,10 +82,13 @@ def _run_law_agents(contract: str, plan: dict, company_raw, employee_raw,
 
     Returns (accepted_issues, company_result, employee_result).
     """
-    queries = plan.get("search_queries") or [
-        "minimum wage", "working hours and overtime", "paid annual leave",
-        "notice period and termination", "mandatory employment terms",
-    ]
+    # Fixed queries embed identically every run, so the retrieved statutes stop
+    # moving; the Supervisor's per-run queries are used only when disabled.
+    queries = FIXED_SEARCH_QUERIES if USE_FIXED_QUERIES else (
+        plan.get("search_queries") or [
+            "minimum wage", "working hours and overtime", "paid annual leave",
+            "notice period and termination", "mandatory employment terms",
+        ])
 
     same_jurisdiction = (
         company_code is not None and company_code == employee_code

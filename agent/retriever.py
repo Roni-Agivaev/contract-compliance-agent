@@ -10,6 +10,9 @@ from config import (
     ILO_NAMESPACE,
     JURISDICTIONS,
     TOP_K,
+    PER_QUERY_K,
+    MAX_PASSAGES,
+    RETRIEVAL_MODE,
 )
 
 
@@ -29,8 +32,14 @@ def _query_namespace(index, vector, namespace, top_k):
 def retrieve(queries, country_code: str, top_k: int = TOP_K) -> list:
     """Return a list of passage dicts: {source, section, text, score}.
 
-    Queries the country namespace + the ILO baseline namespace. Dedups by
-    (source, section), keeping the highest-scoring passage.
+    Retrieval budget is allocated PER QUERY, not as one global top-K pool. Each
+    query is guaranteed PER_QUERY_K passages of its own, so a high-scoring topic
+    can no longer take every slot and leave other topics with no statutory basis.
+    That matters because a law agent may only cite provisions that were actually
+    retrieved — an un-retrieved topic is silently unauditable for that run.
+
+    Queries the country namespace + the ILO baseline namespace, dedupes by
+    (source, section), and caps the total at MAX_PASSAGES.
     """
     if isinstance(queries, str):
         queries = [queries]
@@ -45,23 +54,58 @@ def retrieve(queries, country_code: str, top_k: int = TOP_K) -> list:
         namespaces.append(ns)
     namespaces.append(ILO_NAMESPACE)
 
-    best = {}  # (source, section) -> match-like dict
-    for q in queries:
-        vec = emb.embed_query(q)
-        for namespace in namespaces:
-            for m in _query_namespace(index, vec, namespace, top_k):
-                md = m.metadata or {}
-                key = (md.get("source", "?"), md.get("section", ""))
-                if key not in best or m.score > best[key]["score"]:
-                    best[key] = {
-                        "source": md.get("source", "?"),
-                        "section": md.get("section", ""),
-                        "text": md.get("text", md.get("chunk", "")),
-                        "score": float(m.score),
-                    }
+    if RETRIEVAL_MODE == "global":
+        # Pool every query's hits and keep the MAX_PASSAGES highest scoring.
+        best = {}
+        for q in queries:
+            vec = emb.embed_query(q)
+            for namespace in namespaces:
+                for m in _query_namespace(index, vec, namespace, top_k):
+                    md = m.metadata or {}
+                    key = (md.get("source", "?"), md.get("section", ""))
+                    if key not in best or m.score > best[key]["score"]:
+                        best[key] = {
+                            "source": md.get("source", "?"),
+                            "section": md.get("section", ""),
+                            "text": md.get("text", md.get("chunk", "")),
+                            "score": float(m.score),
+                        }
+        ranked = sorted(best.values(), key=lambda p: p["score"], reverse=True)
+        return ranked[:MAX_PASSAGES]
 
-    passages = sorted(best.values(), key=lambda p: p["score"], reverse=True)
-    return passages[:top_k]
+    selected = {}  # (source, section) -> passage dict
+    for q in queries:
+        if len(selected) >= MAX_PASSAGES:
+            break
+        vec = emb.embed_query(q)
+
+        # this query's own candidate pool, across every namespace
+        pool = []
+        for namespace in namespaces:
+            pool.extend(_query_namespace(index, vec, namespace, top_k))
+        pool.sort(key=lambda m: m.score, reverse=True)
+
+        added = 0
+        for m in pool:
+            if added >= PER_QUERY_K or len(selected) >= MAX_PASSAGES:
+                break
+            md = m.metadata or {}
+            key = (md.get("source", "?"), md.get("section", ""))
+            if key in selected:
+                # already retrieved by an earlier query — keep the better score,
+                # but do not spend this query's quota on a passage we already have
+                if m.score > selected[key]["score"]:
+                    selected[key]["score"] = float(m.score)
+                continue
+            selected[key] = {
+                "source": md.get("source", "?"),
+                "section": md.get("section", ""),
+                "text": md.get("text", md.get("chunk", "")),
+                "score": float(m.score),
+            }
+            added += 1
+
+    return sorted(selected.values(), key=lambda p: p["score"], reverse=True)
 
 
 def format_context(passages) -> str:

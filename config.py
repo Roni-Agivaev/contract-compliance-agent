@@ -25,7 +25,46 @@ EMBEDDING_DIMENSION = 1536
 # ── retrieval / chunking ───────────────────────────────────────────────────────
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 100
-TOP_K = 6                 # chunks retrieved per law agent, before dedup
+TOP_K = 6                 # candidates fetched per query, per namespace
+# Retrieval is allocated per query rather than as one global top-K pool: without
+# a quota a single high-scoring topic can take every slot, leaving other topics
+# with no statutory basis at all — and a law agent may only cite provisions that
+# were actually retrieved, so an un-retrieved topic becomes silently unauditable.
+PER_QUERY_K = 2           # passages guaranteed to each query/topic
+MAX_PASSAGES = 24         # overall cap per law agent, bounds prompt size
+# "per_query" = every query gets its own PER_QUERY_K slots (quota).
+# "global"    = pool all queries and keep the MAX_PASSAGES highest scoring.
+RETRIEVAL_MODE = "per_query"
+# Use the fixed query list below instead of the Supervisor's per-run queries.
+USE_FIXED_QUERIES = True
+
+# Retrieval queries are FIXED rather than written by the Supervisor each run.
+# LLM-generated queries were measured as the dominant source of run-to-run
+# variance: different wording embeds differently, retrieves different statutes,
+# and a law agent may only cite provisions it actually received. A fixed list
+# embeds identically every time, so the evidence base stops moving.
+# One entry per compliance dimension the law agents are expected to check.
+FIXED_SEARCH_QUERIES = [
+    "minimum wage and rates of pay",
+    "maximum weekly working hours and working time limits",
+    "overtime pay and compensation for additional hours",
+    "paid annual leave and holiday entitlement",
+    "notice period and termination of employment",
+    "probationary period and dismissal during probation",
+    "sick pay and continued remuneration during illness",
+    "post-termination restraint, non-compete and compensation for it",
+    "written statement of employment particulars and form requirements",
+    "deductions from wages and equal treatment of employees",
+    # cross-border dimensions: added after a coverage experiment showed the
+    # generic particulars query never retrieved ERA 1996 s.1(4)(k)
+    "choice of law clause and mandatory employment protections that cannot be excluded",
+    "particulars for an employee working outside the country, period abroad and currency of pay",
+]
+
+# Best-effort determinism. gpt-5 models reject every temperature except 1 and
+# Azure rejects top_p, so `seed` is the only sampling control available: the same
+# seed biases the backend toward the same generation. Set to None to disable.
+LLM_SEED = 42
 MAX_REFLECTION_ITERS = 3  # Editor <-> Reflection loop cap (slide 6: "<= N iterations")
 
 PINECONE_INDEX_NAME = "contract-compliance"
@@ -100,11 +139,13 @@ def get_embeddings() -> OpenAIEmbeddings:
 
 
 def get_llm(temperature: float = 1) -> ChatOpenAI:
+    extra = {} if LLM_SEED is None else {"seed": LLM_SEED}
     return ChatOpenAI(
         model=CHAT_MODEL,
         openai_api_key=LLMOD_API_KEY,
         openai_api_base=LLMOD_BASE_URL,
         temperature=temperature,
+        **extra,
     )
 
 
