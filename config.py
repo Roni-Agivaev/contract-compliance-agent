@@ -28,13 +28,6 @@ CHUNK_OVERLAP = 100
 TOP_K = 6                 # chunks retrieved per law agent, before dedup
 MAX_REFLECTION_ITERS = 3  # Editor <-> Reflection loop cap (slide 6: "<= N iterations")
 
-# Outer re-audit loop: after the Editor returns a corrected contract the whole
-# agent runs again over it, until no breaches remain or this many passes have run.
-MAX_AGENT_PASSES = 3
-# Never start another pass this late into the request — Vercel hard-kills at 300s
-# and would return nothing at all, so we stop and return the best contract we have.
-PASS_TIME_BUDGET_SECONDS = 210
-
 PINECONE_INDEX_NAME = "contract-compliance"
 ILO_NAMESPACE = "ilo_baseline"   # universal floor, queried alongside every jurisdiction
 

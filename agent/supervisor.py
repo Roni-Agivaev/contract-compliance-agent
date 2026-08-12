@@ -1,31 +1,20 @@
-"""Supervisor — orchestrates the whole flow.
+"""Supervisor — orchestrates the whole slide-6 flow.
 
 Draft Contract -> Supervisor -> (Company Law || Employee Law) -> Supervisor
--> Editor <-> Reflection -> re-audit the corrected contract -> Compliant Contract.
-
-The audit-and-fix cycle above is wrapped in an OUTER loop: once the Editor has
-produced a corrected contract, the whole agent runs again over that contract,
-repeating until the validation gate accepts zero breaches or MAX_AGENT_PASSES
-passes have run. This catches breaches that a single pass never flagged, since
-Reflection only checks the issue list it was given rather than re-reading the
-whole contract.
+-> Editor <-> Reflection -> Compliant Contract + change log.
 
 The two jurisdictions come from the input prompt (provided explicitly by the
 user); the Supervisor reads them as given, or infers them from the contract. If
-Company Law + Employee Law find no breaches on the first pass, the Supervisor
-autonomously returns the original contract with a "No breaches found" message
-and never invokes Editor/Reflection.
+Company Law + Employee Law find no breaches, the Supervisor autonomously returns
+the original contract with a "No breaches found" message and never invokes
+Editor/Reflection.
 """
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import (
-    get_llm, normalize_country, JURISDICTIONS,
-    MAX_REFLECTION_ITERS, MAX_AGENT_PASSES, PASS_TIME_BUDGET_SECONDS,
-)
+from config import get_llm, normalize_country, JURISDICTIONS, MAX_REFLECTION_ITERS
 from agent.prompts import supervisor_system
 from agent.law_agent import run_law_agent
 from agent.editor import run_editor
@@ -64,12 +53,7 @@ def supported_countries_list() -> str:
 
 def _supervisor_plan(contract: str, company_raw, employee_raw, supported: str,
                      steps: list) -> dict:
-    """One Supervisor LLM call: scope guard, jurisdictions, pay, search queries.
-
-    Re-run on every pass: the Editor changes the salary, so `stated_pay` must be
-    re-extracted from the CURRENT contract or the wage check would keep flagging
-    an already-fixed breach and the loop could never converge.
-    """
+    """One Supervisor LLM call: scope guard, jurisdictions, pay, search queries."""
     system = supervisor_system(supported)
     sup_user = (
         f"Company country: {company_raw or '(not given)'}\n"
@@ -180,11 +164,8 @@ def _editor_reflection(contract: str, issues: list, original: str, steps: list):
 
 
 def run_pipeline(prompt: str) -> dict:
-    """Execute the full agent, re-auditing its own corrected contract.
-
-    Each pass is: Supervisor -> (Company Law || Employee Law) -> validation gate
-    -> Editor <-> Reflection. The loop repeats over the corrected contract until
-    no breaches remain or MAX_AGENT_PASSES passes have run.
+    """Execute the full agent: Supervisor -> (Company Law || Employee Law) ->
+    validation gate -> Editor <-> Reflection.
 
     Returns {"response": str, "steps": [...]} normally, or
     {"error": str, "steps": [...]} when the request cannot be served
@@ -194,67 +175,45 @@ def run_pipeline(prompt: str) -> dict:
     company_raw, employee_raw, contract_text = parse_input(prompt)
     supported = supported_countries_list()
 
-    contract = contract_text
-    all_changes, all_issues = [], []
-    company_result = employee_result = None
-    company_code = employee_code = None
-    passes_run = 0
-    started = time.monotonic()
+    # 1) Supervisor: scope guard, jurisdictions, stated pay, query planning ---
+    plan = _supervisor_plan(contract_text, company_raw, employee_raw, supported, steps)
 
-    for pass_no in range(1, MAX_AGENT_PASSES + 1):
-        passes_run = pass_no
-        plan = _supervisor_plan(contract, company_raw, employee_raw, supported, steps)
+    if not plan.get("in_scope", True):
+        reason = (plan.get("reason")
+                  or "This request is outside the scope of contract compliance review.")
+        return {
+            "response": f"**Out of scope.** {reason}\n\nThis agent reviews employment "
+                        f"contracts/offer letters against local labor law. Please provide a "
+                        f"contract plus the company and employee countries.",
+            "steps": steps,
+        }
 
-        if pass_no == 1:
-            # Scope guard and jurisdiction gate run once — the contract's
-            # countries do not change as it is revised.
-            if not plan.get("in_scope", True):
-                reason = (plan.get("reason")
-                          or "This request is outside the scope of contract compliance review.")
-                return {
-                    "response": f"**Out of scope.** {reason}\n\nThis agent reviews employment "
-                                f"contracts/offer letters against local labor law. Please provide a "
-                                f"contract plus the company and employee countries.",
-                    "steps": steps,
-                }
+    company_raw = plan.get("company_country") or company_raw
+    employee_raw = plan.get("employee_country") or employee_raw
+    company_code = normalize_country(company_raw)
+    employee_code = normalize_country(employee_raw)
 
-            company_raw = plan.get("company_country") or company_raw
-            employee_raw = plan.get("employee_country") or employee_raw
-            company_code = normalize_country(company_raw)
-            employee_code = normalize_country(employee_raw)
+    # 2) Jurisdiction gate: both countries must be in the indexed RAG set ----
+    unsupported = []
+    if company_code is None:
+        unsupported.append(f"company country: {_describe(company_raw)}")
+    if employee_code is None:
+        unsupported.append(f"employee country: {_describe(employee_raw)}")
+    if unsupported:
+        return {
+            "error": (
+                "Unsupported jurisdiction — " + "; ".join(unsupported) + ". "
+                f"This agent only supports contracts where BOTH countries are among: {supported}."
+            ),
+            "steps": steps,
+        }
 
-            unsupported = []
-            if company_code is None:
-                unsupported.append(f"company country: {_describe(company_raw)}")
-            if employee_code is None:
-                unsupported.append(f"employee country: {_describe(employee_raw)}")
-            if unsupported:
-                return {
-                    "error": (
-                        "Unsupported jurisdiction — " + "; ".join(unsupported) + ". "
-                        f"This agent only supports contracts where BOTH countries are among: "
-                        f"{supported}."
-                    ),
-                    "steps": steps,
-                }
+    # 3) Company Law || Employee Law, then the Supervisor validation gate ----
+    issues, company_result, employee_result = _run_law_agents(
+        contract_text, plan, company_raw, employee_raw, company_code, employee_code, steps)
 
-        issues, company_result, employee_result = _run_law_agents(
-            contract, plan, company_raw, employee_raw, company_code, employee_code, steps)
-
-        if not issues:
-            break  # converged — nothing left to fix
-
-        all_issues.extend(issues)
-        contract, changes = _editor_reflection(contract, issues, contract_text, steps)
-        all_changes.extend(changes)
-
-        # Never start another pass so late that Vercel's 300s ceiling would kill
-        # the request and return nothing at all.
-        if time.monotonic() - started > PASS_TIME_BUDGET_SECONDS:
-            break
-
-    # Nothing was ever wrong: return the original contract untouched.
-    if not all_issues:
+    # 4) Autonomous no-breach branch ----------------------------------------
+    if not issues:
         jurisdictions = _join_jurisdictions(company_result, employee_result)
         response = (
             f"## ✅ No breaches found\n\n"
@@ -264,8 +223,9 @@ def run_pipeline(prompt: str) -> dict:
         )
         return {"response": response, "steps": steps}
 
-    response = _final_report(company_result, employee_result, all_issues,
-                             all_changes, contract, passes_run)
+    # 5) Editor <-> Reflection, then finalize -------------------------------
+    draft, changes = _editor_reflection(contract_text, issues, contract_text, steps)
+    response = _final_report(company_result, employee_result, issues, changes, draft)
     return {"response": response, "steps": steps}
 
 
@@ -353,12 +313,10 @@ def _join_jurisdictions(company_result, employee_result) -> str:
     return " and ".join(labels) if labels else "the specified jurisdictions"
 
 
-def _final_report(company_result, employee_result, issues, changes, final_contract,
-                  passes_run: int = 1) -> str:
+def _final_report(company_result, employee_result, issues, changes, final_contract) -> str:
     lines = ["## ⚖️ Compliance Review — Contract Corrected", ""]
     lines.append(f"**Jurisdictions reviewed:** {_join_jurisdictions(company_result, employee_result)}")
-    lines.append(f"**Breaches found:** {len(issues)}  ·  **Edits applied:** {len(changes)}"
-                 f"  ·  **Review passes:** {passes_run}")
+    lines.append(f"**Breaches found:** {len(issues)}  ·  **Edits applied:** {len(changes)}")
     lines.append("")
     lines.append("### Breaches found")
     for b in issues:

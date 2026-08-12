@@ -86,12 +86,10 @@ arrow(ax, (10.6, 4.05), (10.6, 5.05), color=GREEN)
 lbl(ax, 9.55, 4.55, "revise")
 lbl(ax, 11.15, 4.55, "≤ N iters", color=GREEN)
 
-# reflection -> supervisor: OUTER re-audit loop over the corrected contract
+# reflection -> supervisor (pass) and supervisor -> compliant
 arrow(ax, (9.1, 3.4), (4.6, 3.15), color=GREEN, rad=0.32)
-lbl(ax, 6.9, 2.42, "corrected contract — re-audit, ≤ 3 passes", color=GREEN)
-# supervisor -> compliant contract (only once no breaches remain)
+lbl(ax, 6.9, 2.5, "pass", color=GREEN)
 arrow(ax, (3.4, 3.05), (5.6, 1.75), color=GREEN, rad=0.05)
-lbl(ax, 3.9, 2.2, "0 breaches", color=GREEN)
 
 # ── data-store legend (empty bottom-left) ──
 ax.text(0.3, 1.75, "Data stores", fontsize=9, fontweight="bold", color=INK)
